@@ -676,7 +676,7 @@ compilation_database_aspect = aspect(
     },
     fragments = ["cpp", "objc", "apple"],
     provides = [CompilationAspect],
-    toolchains = ["@bazel_tools//tools/cpp:toolchain_type"] + [use_cuda_toolchain] if cuda_enable else [],
+    toolchains = ["@bazel_tools//tools/cpp:toolchain_type"] + ([use_cuda_toolchain] if cuda_enable else []),
     implementation = _compilation_database_aspect_impl,
     apply_to_generating_rules = True,
 )
