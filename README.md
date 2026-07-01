@@ -82,6 +82,55 @@ load("@com_grail_bazel_compdb//:deps.bzl", "bazel_compdb_deps")
 bazel_compdb_deps()
 ```
 
+With Bzlmod enabled, add the module and extension to your MODULE.bazel:
+
+```python
+bazel_dep(name = "com_grail_bazel_compdb", version = "<version>")
+
+bazel_compdb = use_extension(
+    "@com_grail_bazel_compdb//:extensions.bzl",
+    "bazel_compdb",
+)
+bazel_compdb.config()
+use_repo(
+    bazel_compdb,
+    "com_grail_bazel_config_compdb",
+    "com_grail_bazel_output_base_util",
+)
+```
+
+`bazel_compdb.config()` is honoured only in the root module, and only once: the
+two repositories it generates are shared by the whole module graph, so letting
+dependencies configure them would make the result depend on module resolution
+order.
+
+For CUDA support, also declare rules_cuda yourself and tell compdb where it is:
+
+```python
+bazel_dep(name = "rules_cuda", version = "0.2.5")
+
+bazel_compdb.config(
+    cuda_enable = True,
+    global_filter_flags = [
+        "-ccbin",
+        "-gencode",
+    ],
+    rules_cuda = "@rules_cuda//cuda:defs.bzl",
+)
+use_repo(
+    bazel_compdb,
+    "com_grail_bazel_config_compdb",
+    "com_grail_bazel_output_base_util",
+)
+```
+
+`rules_cuda` accepts any label inside your own rules_cuda repository; compdb
+resolves it to that repository's canonical name and reads the CUDA toolchain
+you already registered. It never fetches a second copy, and depending on compdb
+never pulls rules_cuda (or the toolchain it registers) into a build that does
+not ask for CUDA. `use_repo` lists only the two generated repositories -- the
+extension does not re-export rules_cuda or bazel_skylib.
+
 In your BUILD file located in any package:
 ```python
 ## Replace workspace_name and dir_path as per your setup.

@@ -15,21 +15,35 @@
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 load("@bazel_tools//tools/build_defs/repo:utils.bzl", "maybe")
 
-_cuda_config = """
-load("@rules_cuda//cuda:repositories.bzl", _register_detected_cuda_toolchains = "register_detected_cuda_toolchains", _rules_cuda_deps = "rules_cuda_dependencies")
-load("@rules_cuda//cuda/private:toolchain.bzl", _find_cuda_toolchain = "find_cuda_toolchain", _use_cuda_toolchain = "use_cuda_toolchain")
-load("@rules_cuda//cuda/private:rules/common.bzl", _ALLOW_CUDA_HDRS = "ALLOW_CUDA_HDRS", _ALLOW_CUDA_SRCS = "ALLOW_CUDA_SRCS")
-load("@rules_cuda//cuda/private:cuda_helper.bzl", _cuda_helper = "cuda_helper", )
+# {rc} is substituted with the repository prefix of the caller's rules_cuda:
+# "@rules_cuda" in WORKSPACE mode, or a canonical name under Bzlmod, where
+# compdb has no apparent name for the root module's copy. The canonical
+# separator is version dependent -- "@@rules_cuda~" on Bazel 7, "@@rules_cuda+"
+# on Bazel 8 -- so extensions.bzl derives the prefix from label.repo_name
+# rather than spelling either one out.
+#
+# cuda_toolkit is deliberately not loaded: rules_cuda 0.3.0 deleted
+# cuda/private:rules/cuda_toolkit.bzl and re-exports cuda_toolkit from
+# cuda/repositories.bzl instead. {rc} follows the CONSUMER's rules_cuda, not the
+# version this module declares, so the template has to load only what both
+# 0.2.x and 0.3.x provide; every other symbol below exists in both.
+_CUDA_LOADS = """
+load("{rc}//cuda:repositories.bzl", _register_detected_cuda_toolchains = "register_detected_cuda_toolchains", _rules_cuda_deps = "rules_cuda_dependencies")
+load("{rc}//cuda/private:toolchain.bzl", _find_cuda_toolchain = "find_cuda_toolchain", _use_cuda_toolchain = "use_cuda_toolchain")
+load("{rc}//cuda/private:rules/common.bzl", _ALLOW_CUDA_HDRS = "ALLOW_CUDA_HDRS", _ALLOW_CUDA_SRCS = "ALLOW_CUDA_SRCS")
+load("{rc}//cuda/private:cuda_helper.bzl", _cuda_helper = "cuda_helper", )
 load("@bazel_skylib//lib:paths.bzl", _paths = "paths")
 load("@bazel_skylib//rules:common_settings.bzl", _BuildSettingInfo = "BuildSettingInfo")
-load("@rules_cuda//cuda/private:providers.bzl", _CudaArchsInfo = "CudaArchsInfo", _CudaInfo = "CudaInfo")
-load("@rules_cuda//cuda/private:action_names.bzl", _ACTION_NAMES = "ACTION_NAMES")
-load("@rules_cuda//cuda/private:toolchain_config_lib.bzl", _config_helper = "config_helper", _unique = "unique")
-load("@rules_cuda//cuda/private:rules/cuda_toolkit.bzl", _cuda_toolkit = "cuda_toolkit")
+load("{rc}//cuda/private:providers.bzl", _CudaArchsInfo = "CudaArchsInfo", _CudaInfo = "CudaInfo")
+load("{rc}//cuda/private:action_names.bzl", _ACTION_NAMES = "ACTION_NAMES")
+load("{rc}//cuda/private:toolchain_config_lib.bzl", _config_helper = "config_helper", _unique = "unique")
+"""
+
+_CUDA_EXPORTS = """
 register_detected_cuda_toolchains = _register_detected_cuda_toolchains
 rules_cuda_deps = _rules_cuda_deps
 find_cuda_toolchain = _find_cuda_toolchain
-use_cuda_toolchain = "@rules_cuda" + ''.join(_use_cuda_toolchain())
+use_cuda_toolchain = "{rc}" + ''.join(_use_cuda_toolchain())
 ALLOW_CUDA_HDRS = _ALLOW_CUDA_HDRS
 ALLOW_CUDA_SRCS = _ALLOW_CUDA_SRCS
 cuda_helper = _cuda_helper
@@ -40,7 +54,6 @@ CudaInfo = _CudaInfo
 ACTION_NAMES = _ACTION_NAMES
 unique = _unique
 config_helper = _config_helper
-cuda_toolkit = _cuda_toolkit
 """
 
 _empty_config = """
@@ -58,14 +71,22 @@ CudaInfo = ""
 ACTION_NAMES = ""
 unique = ""
 config_helper = ""
-cuda_toolkit = ""
 """
 
 def _config_compdb_repository_impl(rctx):
+    # A .bzl file requires every load() to precede any assignment, so the loads
+    # are emitted first and the exports afterwards.
+    #
+    # cc_common and CcInfo are not re-exported here: they are still Starlark
+    # builtins on Bazel 6, 7 and 8, and aspects.bzl uses them directly. Loading
+    # them from rules_cc instead would force rules_cc into every consumer, and
+    # rules_cc 0.2.x cannot be used from WORKSPACE at all -- its cc/defs.bzl
+    # loads @cc_compatibility_proxy, which only a module extension creates.
     build_file_content = ""
 
     if rctx.attr.cuda_enable:
-        build_file_content += _cuda_config
+        build_file_content += _CUDA_LOADS.format(rc = rctx.attr.rules_cuda_repo)
+        build_file_content += _CUDA_EXPORTS.format(rc = rctx.attr.rules_cuda_repo)
     else:
         build_file_content += _empty_config
 
@@ -115,6 +136,13 @@ config_compdb_repository = repository_rule(
         "cuda_enable": attr.bool(
             default = False,
             doc = "Enable the cuda compiler.",
+        ),
+        "rules_cuda_repo": attr.string(
+            default = "@rules_cuda",
+            doc = ("Repository prefix used to load rules_cuda. WORKSPACE mode keeps the " +
+                   "apparent name '@rules_cuda'; Bzlmod passes the canonical name of the " +
+                   "rules_cuda repo owned by the root module, e.g. '@@rules_cuda+', because " +
+                   "that repository is not visible under any apparent name from here."),
         ),
     },
     doc = "To config compdb.",
