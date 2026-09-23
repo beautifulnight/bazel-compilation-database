@@ -14,45 +14,43 @@
 
 module(
     name = "com_grail_bazel_compdb",
-    version = "0.0.0",
+    version = "0.0.1",
 )
 
 # Loaded by the generated @com_grail_bazel_config_compdb when CUDA is enabled.
 bazel_dep(name = "bazel_skylib", version = "1.7.1")
 
-# Declared as a plain bazel_dep (NOT dev_dependency): this repository's own
-# MODULE.bazel passes `rules_cuda = "@rules_cuda//cuda:defs.bzl"` to
-# bazel_compdb.config(), and that tag is validated during module resolution even
-# when this module is consumed as a dependency (e.g. via local_path_override).
-# A dev_dependency is not realized for non-root modules, which would make the
-# `@rules_cuda` label in the tag unresolvable. Consumers still bring their own
-# rules_cuda and MVS dedupes to a single copy; this dep is never re-exported
-# through compdb's public API.
+# The extension generates the two machine- and caller-specific repos
+# (com_grail_bazel_config_compdb, com_grail_bazel_output_base_util). This
+# non-dev usage only makes them visible to this module's own .bzl files
+# (defs.bzl, aspects.bzl, deps.bzl); it carries no tags, so consuming this
+# module as a dependency adds nothing to the consumer's module graph beyond
+# bazel_skylib. The consumer configures the extension from its own MODULE.bazel.
+bazel_compdb = use_extension("//:extensions.bzl", "bazel_compdb")
+use_repo(
+    bazel_compdb,
+    "com_grail_bazel_config_compdb",
+    "com_grail_bazel_output_base_util",
+)
+
+# Everything below only configures this repository's own build and is dropped
+# when the module is consumed as a dependency: Bazel ignores dev_dependency
+# bazel_deps and dev_dependency extension usages of non-root modules,
+# so neither rules_cuda nor the `rules_cuda = "@rules_cuda..."`
+# label in the tag is ever resolved on behalf of a consumer. Consumers that
+# want CUDA declare their own rules_cuda and pass it to bazel_compdb.config().
 #
 # Pinned at 0.2.5, not 0.3.0: 0.3.0 renamed the toolkit repo and its tag
-# (cuda.local_toolchain/@local_cuda -> cuda.toolkit/@cuda), and consumers such as
-# AIDI-SDK have third-party BUILD files that hard-code @local_cuda. Declaring the
-# higher version here would drag them onto it through MVS. The rules_cuda APIs
-# this repository loads exist in both 0.2.x and 0.3.x, so consumers that are
-# already on 0.3.0 still resolve to their own copy.
-bazel_dep(name = "rules_cuda", version = "0.2.5")
+# (cuda.local_toolchain/@local_cuda -> cuda.toolkit/@cuda). The rules_cuda APIs
+# this repository loads exist in both 0.2.x and 0.3.x.
+bazel_dep(name = "rules_cuda", version = "0.2.5", dev_dependency = True)
 
-# The extension generates the two machine- and caller-specific repos
-# (com_grail_bazel_config_compdb, com_grail_bazel_output_base_util). When this
-# repository is consumed as a dependency, the consumer calls its own instance of
-# this extension and exports the repos into its own module; this declaration
-# only configures compdb itself.
-bazel_compdb = use_extension("//:extensions.bzl", "bazel_compdb")
-bazel_compdb.config(
+bazel_compdb_dev = use_extension("//:extensions.bzl", "bazel_compdb", dev_dependency = True)
+bazel_compdb_dev.config(
     cuda_enable = True,
     global_filter_flags = [
         "-ccbin",
         "-gencode",
     ],
     rules_cuda = "@rules_cuda//cuda:defs.bzl",
-)
-use_repo(
-    bazel_compdb,
-    "com_grail_bazel_config_compdb",
-    "com_grail_bazel_output_base_util",
 )
